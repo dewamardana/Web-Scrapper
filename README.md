@@ -1,61 +1,62 @@
-# Web-Scrapper
-A Python scraper to extract health articles from Halodoc and Alodokter using Selenium and BeautifulSoup. Retrieves title, author, publish date, content, tags, and links. For research and educational use only. All content belongs to the respective websites—do not use commercially without permission.
+# 🕸️ Web Scraper
 
+A Python-based scraper to extract health-related articles from **Halodoc** and **Alodokter** using **Selenium** and **BeautifulSoup**.  
+It retrieves the **title, author/reviewer, publish date, full content, tags, and source link**.  
+📚 Intended for research and educational use only.  
+⚠️ All content belongs to the respective websites. Do not use commercially without proper authorization.
 
-📰 Artikel Scraper Halodoc & Alodokter
-Python-based web scraper untuk mengambil artikel kesehatan dari dua situs populer di Indonesia: Halodoc dan Alodokter. Data yang dikumpulkan mencakup:
+---
 
-Judul artikel
+## 📰 What It Does
 
-Penulis atau peninjau
+This tool scrapes health articles from two popular Indonesian medical platforms:  
+**Halodoc** and **Alodokter**.
 
-Tanggal publikasi
+### Extracted Information:
+- ✅ Article title  
+- 👨‍⚕️ Author or reviewer  
+- 📅 Publication date  
+- 📄 Full article content  
+- 🏷️ Article tags  
+- 🔗 Source URL  
 
-Isi artikel lengkap
+Results are saved as structured **JSON files**, grouped by source and search keyword.
 
-Tag artikel
+---
 
-Sumber dan link artikel
+## 📅 When to Use
 
-Data disimpan dalam format JSON per sumber dan kata kunci pencarian.
+This scraper is useful for:
+- 📚 Health content research  
+- 🤖 Data collection for NLP or text analysis  
+- 🔍 Comparative studies of medical topics  
+- 🎓 Academic and educational datasets  
+*(Not intended for production or commercial use without permission.)*
 
-📅 Kapan Digunakan?
-Scraper ini cocok digunakan untuk:
+---
 
-Riset konten kesehatan
+## ⚙️ Features
 
-Pengumpulan data untuk NLP atau analisis teks
+- 🧠 Uses **Selenium** and **BeautifulSoup** to handle dynamic web content  
+- 🔍 Keyword-based search  
+- 🧾 Choose how many articles to scrape  
+- 🌐 Dual-source scraping from:
+  - `halodoc.com`  
+  - `alodokter.com`  
+- 🔁 Automatic retries and error handling  
 
-Studi banding topik medis
+---
 
-Dataset pendidikan dan akademik (bukan untuk produksi tanpa izin resmi dari situs sumber)
+## 🚀 Installation & Usage
 
-⚙️ Fitur
-Menggunakan Selenium dan BeautifulSoup untuk scraping halaman dinamis.
+### 1. Clone the Repository
 
-Mendukung pencarian berbasis kata kunci (keyword).
-
-Bisa menentukan jumlah artikel yang ingin dikumpulkan.
-
-Scraping dari dua situs sekaligus:
-
-halodoc.com
-
-alodokter.com
-
-Penanganan error & retry otomatis jika gagal mengambil artikel.
-
-🚀 Instalasi dan Cara Menjalankan
-1. Clone Repository
-bash
-Copy
-Edit
-git clone https://github.com/username/nama-repo.git
-cd nama-repo
-2. Buat dan Aktifkan Virtual Environment (opsional tapi disarankan)
-bash
-Copy
-Edit
+```bash
+git clone https://github.com/dewamardana/Web-Scrapper.git
+cd Web-Scrapper
+```
+2. Create and Activate Virtual Environment (optional but recommended)
+```bash
 # Windows
 python -m venv venv
 venv\Scripts\activate
@@ -63,38 +64,32 @@ venv\Scripts\activate
 # macOS / Linux
 python3 -m venv venv
 source venv/bin/activate
+```
 3. Install Dependencies
-bash
-Copy
-Edit
+```bash
 pip install -r requirements.txt
-4. Jalankan Scraper
-bash
-Copy
-Edit
+```
+4. Run the Scraper
+```bash
 python main.py
-Kemudian masukkan:
+```
+Then input:
 
-Kata kunci pencarian: contoh mental, diabetes, dll.
+The search keyword (e.g., mental, diabetes, etc.)
 
-Jumlah artikel: angka (misal 10) atau ketik max untuk semua yang tersedia.
+The number of articles you want to scrape, or type max for all available
 
 📁 Output
-File hasil scraping disimpan otomatis ke dalam folder:
-
-pgsql
-Copy
-Edit
+Scraped articles are saved automatically in:
+```bash
 Data/
-  ├── halodoc.com/
-  │     └── mental.json
-  └── alodokter.com/
-        └── mental.json
-Format output:
-
-json
-Copy
-Edit
+├── halodoc.com/
+│     └── mental.json
+└── alodokter.com/
+      └── mental.json
+```
+Example Output Format (JSON):
+```bash
 [
   {
     "judul_artikel": "Apa Itu Kesehatan Mental?",
@@ -106,17 +101,17 @@ Edit
     "sumber_data": "halodoc.com"
   }
 ]
+```
 ✅ Requirements
-Lihat requirements.txt, tapi secara umum kamu butuh:
+Refer to requirements.txt, but generally you need:
 
-Python >= 3.8
+🐍 Python ≥ 3.8
 
-Google Chrome terinstal
+🌐 Google Chrome installed
 
-ChromeDriver versi kompatibel dengan Chrome
+🔧 ChromeDriver version that matches your Chrome browser
 
-Library:
-
+Python Packages:
 requests
 
 beautifulsoup4
@@ -124,9 +119,11 @@ beautifulsoup4
 selenium
 
 💡 Tips
-Untuk kemudahan setup ChromeDriver, kamu bisa menambahkan webdriver-manager dan mengganti inisialisasi Selenium.
+You can simplify ChromeDriver setup using webdriver-manager.
 
-File HTML debug disimpan secara otomatis untuk membantu saat gagal mengambil elemen.
+Debug HTML files like debug_alodokter_selenium_pageX.html are saved automatically to assist if scraping fails.
 
 ⚠️ Disclaimer
-Proyek ini hanya untuk tujuan edukasi dan riset pribadi. Semua konten milik Halodoc dan Alodokter. Jangan gunakan untuk kepentingan komersial tanpa izin dari sumber resmi.
+This project is for educational and research purposes only.
+All article content is owned by Halodoc and Alodokter.
+🛑 Do not use for commercial purposes without permission from the original sources.
