@@ -2,6 +2,7 @@ import time
 import os
 import json
 import requests
+import re
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -9,6 +10,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
@@ -85,9 +88,12 @@ def search_halodoc(keyword, max_articles=20):
     driver.get(f"https://www.halodoc.com/artikel/search/{keyword}")
     wait = WebDriverWait(driver, 10)
 
-    data = []
-    seen = set()
-    collected = 0
+    # Load data lama
+    existing_data = load_data("halodoc.com", keyword)
+    seen = {item["link"] for item in existing_data}
+    data = existing_data[:]
+    collected = len(data)
+    print(f"📂 Data lama dimuat: {collected} artikel, lanjut scraping...")
 
     while collected < max_articles:
         soup = BeautifulSoup(driver.page_source, "html.parser")
@@ -104,12 +110,11 @@ def search_halodoc(keyword, max_articles=20):
         for link in new_links:
             if collected >= max_articles:
                 break
-
             print(f"🔗 Mengambil: {link}")
             detail = get_halodoc_article_detail(link)
 
             if not detail:
-                print("⚠️ Gagal, mencoba ulang...")
+                print("⚠ Gagal, mencoba ulang...")
                 time.sleep(2)
                 detail = get_halodoc_article_detail(link)
 
@@ -118,7 +123,13 @@ def search_halodoc(keyword, max_articles=20):
                 collected += 1
                 print(f"✅ Berhasil ({collected}/{max_articles})")
             else:
-                print(f"❌ Gagal mengambil: {link}")
+                detail = get_detail_with_retry(get_halodoc_article_detail, link)
+                if detail:
+                    data.append(detail)
+                    collected += 1
+                    print(f"✅ Berhasil ({collected}/{max_articles})")
+                else:
+                    print(f"❌ Gagal mengambil: {link}")
 
             time.sleep(1)
 
@@ -136,7 +147,7 @@ def search_halodoc(keyword, max_articles=20):
 
     driver.quit()
     save_data("halodoc.com", keyword, data)
-    print(f"🗂️ Halodoc: {len(data)} artikel disimpan.")
+    print(f"🗂 Halodoc: {len(data)} artikel disimpan.")
     return data
 
 
@@ -199,9 +210,12 @@ def search_alodokter(keyword, max_articles=3):
     options.add_argument("--headless=new")
     driver = webdriver.Chrome(options=options)
 
-    data = []
-    results = set()
-    collected = 0
+    # 🔹 Load data lama kalau ada
+    existing_data = load_data("alodokter.com", keyword)
+    results = {item["link"] for item in existing_data}  # link yang sudah ada
+    data = existing_data[:]
+    collected = len(data)
+    print(f"📂 Alodokter: Data lama {collected} artikel, lanjut scraping...")
     page = 1
 
     try:
@@ -222,7 +236,7 @@ def search_alodokter(keyword, max_articles=3):
             cards = soup.find_all("card-post-index")
 
             if not cards:
-                print("⚠️ Tidak menemukan elemen <card-post-index>")
+                print("⚠ Tidak menemukan elemen <card-post-index>")
                 break
 
             for card in cards:
@@ -238,7 +252,7 @@ def search_alodokter(keyword, max_articles=3):
 
                         detail = get_alodokter_article_detail(full_url)
                         if not detail:
-                            print("⚠️ Gagal, mencoba ulang...")
+                            print("⚠ Gagal, mencoba ulang...")
                             time.sleep(2)
                             detail = get_alodokter_article_detail(full_url)
 
@@ -247,7 +261,15 @@ def search_alodokter(keyword, max_articles=3):
                             collected += 1
                             print(f"✅ Berhasil ({collected}/{max_articles})")
                         else:
-                            print(f"❌ Gagal mengambil: {full_url}")
+                            detail = get_detail_with_retry(
+                                get_halodoc_article_detail, full_url
+                            )
+                            if detail:
+                                data.append(detail)
+                                collected += 1
+                                print(f"✅ Berhasil ({collected}/{max_articles})")
+                            else:
+                                print(f"❌ Gagal mengambil: {full_url}")
 
                         time.sleep(1)
             page += 1
@@ -257,11 +279,242 @@ def search_alodokter(keyword, max_articles=3):
 
     print(f"\n🔚 Total link unik ditemukan: {len(results)}")
     save_data("alodokter.com", keyword, data)
-    print(f"🗂️ Alodokter: {len(data)} artikel disimpan.")
+    print(f"🗂 Alodokter: {len(data)} artikel disimpan.")
+    return data
+
+
+# ============== HALOSEHAT ==============
+
+
+def parse_author_info(info_text):
+    """
+    Parsing teks info peninjau/penulis HelloSehat menjadi (reviewer, author, tanggal)
+    """
+    reviewer = ""
+
+    if not info_text:
+        return reviewer
+
+    # Cari reviewer (setelah 'Ditinjau oleh' sampai simbol "·")
+    reviewer_match = re.search(r"Ditinjau oleh\s+(.*?)\s+·", info_text)
+    if reviewer_match:
+        reviewer = reviewer_match.group(1).strip()
+
+    return reviewer
+
+
+def get_hellosehat_article_detail(url, driver=None):
+    """
+    Ambil detail artikel HelloSehat: judul, peninjau, tanggal, isi, tag
+    """
+    try:
+        html = None
+
+        # --- coba pakai requests jika kontennya sudah lengkap ---
+        try:
+            r = requests.get(url, headers=headers, timeout=15)
+            if r.ok and "Reviewer Name" in r.text:
+                html = r.text
+        except Exception:
+            html = None
+
+        # --- fallback: Selenium (untuk elemen yang dirender JS) ---
+        if not html and driver:
+            driver.get(url)
+            try:
+                # tunggu anchor reviewer muncul
+                WebDriverWait(driver, 12).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, 'a[data-event-category="Reviewer Name"]')
+                    )
+                )
+            except TimeoutException:
+                # minimal tunggu heading jika reviewer tidak ketemu
+                WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "h1"))
+                )
+            html = driver.page_source
+
+        if not html:
+            raise ValueError("Halaman tidak memuat data yang dibutuhkan")
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # ===== Judul =====
+        title_tag = soup.find("h1")
+        title = title_tag.get_text(strip=True) if title_tag else ""
+
+        # Info penulis & peninjau
+        reviewer = ""
+        info_p = soup.select_one("p.mantine-Text-root.mantine-yogv28")
+        if info_p:
+            text_info = info_p.get_text(" ", strip=True)
+            reviewer = parse_author_info(text_info)
+
+        # ===== Tanggal =====
+        date = ""
+        info_p = soup.find(
+            "p", class_="mantine-Text-root mantine-Text-root mantine-yogv28"
+        )
+        if info_p:
+            txt = info_p.get_text(" ", strip=True)
+            if "Diperbarui" in txt:
+                date = txt.split("Diperbarui")[-1].strip()
+
+        # ===== Isi artikel =====
+        content_parts = []
+        body = soup.select_one("div.css-jwma8r.eq7z8yn3")
+        if body:
+            for p in body.select("p"):
+                t = p.get_text(" ", strip=True)
+                if t and "Baca juga" not in t:
+                    content_parts.append(t)
+
+        if not content_parts:
+            for p in soup.select("div.body-content.article-content-wrapper p"):
+                t = p.get_text(" ", strip=True)
+                if t and "Baca juga" not in t:
+                    content_parts.append(t)
+
+        content = "\n".join(content_parts)
+
+        # ===== Tags =====
+        tags = [
+            a.get_text(strip=True)
+            for a in soup.select("div.breadcrumbs-top a")
+            if a.get_text(strip=True)
+        ]
+
+        return {
+            "judul_artikel": title,
+            "penulis_peninjau": reviewer,
+            "tanggal_publish": date,
+            "isi_artikel": content,
+            "tag": tags,
+            "link": url,
+            "sumber_data": "hellosehat.com",
+        }
+
+    except Exception as e:
+        print(f"Gagal HelloSehat ({url}): {e}")
+        return None
+
+
+BASE_URL = (
+    "https://hellosehat.com/search/?s={keyword}&tab=articles&page={page}&per_page=10"
+)
+
+
+def search_hellosehat(keyword, max_articles=20):
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()), options=options
+    )
+
+    # Load data lama
+    existing_data = load_data("hellosehat.com", keyword)
+    seen = {item["link"] for item in existing_data}
+    data = existing_data[:]
+    collected = len(data)
+    print(f"📂 Data lama dimuat: {collected} artikel, lanjut scraping...")
+    page = 1
+
+    try:
+        while collected < max_articles:
+            url = BASE_URL.format(keyword=keyword, page=page)
+            print(f"🌐 Halaman {page}: {url}")
+            driver.get(url)
+
+            try:
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_all_elements_located(
+                        (By.CSS_SELECTOR, 'a[data-event-category="Search Page"]')
+                    )
+                )
+            except TimeoutException:
+                print("⚠ Tidak menemukan artikel lagi, berhenti.")
+                break
+
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+
+            # Kumpulkan link artikel
+            links = []
+            for a in soup.select(
+                'a[data-event-category="Search Page"][data-event-action="Articles - Click Article"]'
+            ):
+                href = a.get("href")
+                if not href:
+                    continue
+
+                if href.startswith("/"):
+                    href_full = "https://hellosehat.com" + href
+                else:
+                    href_full = href
+
+                if href_full not in seen:
+                    seen.add(href_full)
+                    links.append(href_full)
+
+            if not links:
+                print("⛔ Tidak ada link baru di halaman ini.")
+                break
+
+            # Ambil detail tiap artikel
+            for link in links:
+                if collected >= max_articles:
+                    break
+
+                print(f"🔗 Mengambil: {link}")
+                detail = get_hellosehat_article_detail(link, driver=driver)
+
+                if not detail:
+                    print("⚠ Gagal, mencoba ulang...")
+                    time.sleep(2)
+                    detail = get_hellosehat_article_detail(link, driver=driver)
+
+                if detail:
+                    data.append(detail)
+                    collected += 1
+                    print(f"✅ Berhasil ({collected}/{max_articles})")
+                else:
+                    detail = get_detail_with_retry(get_hellosehat_article_detail, link)
+                    if detail:
+                        data.append(detail)
+                        collected += 1
+                        print(f"✅ Berhasil ({collected}/{max_articles})")
+                    else:
+                        print(f"❌ Gagal mengambil: {link}")
+
+                time.sleep(1)
+
+            page += 1
+            time.sleep(2)
+
+    finally:
+        driver.quit()
+
+    save_data("hellosehat.com", keyword, data)
+    print(f"🗂 HelloSehat: {len(data)} artikel disimpan.")
     return data
 
 
 # ============== SAVE FUNCTION ==============
+
+
+# ============== COMMON HELPERS ==============
+
+
+def load_data(source, keyword):
+    folder = os.path.join("Data", source)
+    filepath = os.path.join(folder, f"{keyword}.json")
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
 
 def save_data(source, keyword, data):
@@ -270,6 +523,20 @@ def save_data(source, keyword, data):
     filepath = os.path.join(folder, f"{keyword}.json")
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def get_detail_with_retry(getter_func, url, max_retries=10, driver=None):
+    for attempt in range(1, max_retries + 1):
+        try:
+            detail = getter_func(url) if not driver else getter_func(url, driver=driver)
+            if detail:
+                print(f"🔗 Berhasil Mengambil URL : {url}")
+                return detail
+        except Exception as e:
+            print(f"⚠ Error ({attempt}/{max_retries}) {url}: {e}")
+        time.sleep(2)
+    print(f"❌ Gagal total mengambil {url}")
+    return None
 
 
 # ============== MAIN ==============
@@ -290,6 +557,7 @@ def main(keyword):
 
     search_halodoc(keyword, max_articles=max_artikel)
     search_alodokter(keyword, max_articles=max_artikel)
+    search_hellosehat(keyword, max_articles=max_artikel)
 
 
 if __name__ == "__main__":
