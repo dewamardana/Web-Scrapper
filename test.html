@@ -1,0 +1,862 @@
+import requests
+from bs4 import BeautifulSoup
+import csv
+import time
+import json
+
+HEADERS = {
+"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+}
+
+def get_all_article_links(query="kesehatan mental", max_page=499):
+all_links = []
+page = 1
+
+while True:
+print(f"\n🔄 Mengambil halaman ke-{page}...")
+url = f"https://search.kompas.com/search?q={query}&site_id=all&last_date=all&type=article&page={page}"
+res = requests.get(url, headers=HEADERS)
+soup = BeautifulSoup(res.text, "html.parser")
+
+# Cari berbagai kemungkinan struktur artikel
+article_list = soup.find("div", class_=lambda c: c and "articleList" in c) or \
+soup.find("ul", class_="article__list")
+
+if not article_list:
+print("❌ Tidak menemukan article_list di halaman ini.")
+break
+
+# Ambil item dari struktur apapun
+items = article_list.find_all("div", class_="articleItem")
+if not items:
+items = article_list.find_all("li", class_="article_list_item")
+
+if not items:
+print("✅ Tidak ada artikel lagi di halaman ini. Stop.")
+break
+
+print(f"📄 Jumlah artikel di halaman {page}: {len(items)}")
+
+count_before = len(all_links)
+for item in items:
+a_tag = item.find("a")
+if a_tag and a_tag.get("href"):
+href = a_tag["href"]
+if "tv.kompas.com" not in href:
+all_links.append(href)
+
+count_after = len(all_links)
+print(f"✅ {count_after - count_before} link ditambahkan.")
+page += 1
+time.sleep(1)
+
+all_links = list(set(all_links)) # Hapus duplikat
+return all_links
+
+
+def scrape_article(url):
+res = requests.get(url, headers=HEADERS)
+soup = BeautifulSoup(res.text, "html.parser")
+
+result = {
+"url": url,
+"sumber_berita": "",
+"jenis_konten": "",
+"judul": "",
+"tanggal_publikasi": "",
+"jam_publikasi": "",
+"nama_editor": "",
+"jabatan_editor": "",
+"konten_berita": "",
+"tag_berita": ""
+}
+
+# Breadcrumb
+breadcrumb = soup.find("ul", class_="breadcrumb__wrap")
+if breadcrumb:
+items = breadcrumb.find_all("li", class_="breadcrumb__item")
+if len(items) >= 2:
+result["sumber_berita"] = items[0].get_text(strip=True)
+result["jenis_konten"] = items[1].get_text(strip=True)
+
+# Judul
+title_tag = soup.find("h1", class_="read__title")
+if title_tag:
+result["judul"] = title_tag.get_text(strip=True)
+
+# Bagian header (waktu & editor)
+header = soup.find("div", class_="read__header")
+if header:
+# Ambil waktu publikasi
+time_div = header.find("div", class_="read__time")
+if time_div:
+text = time_div.get_text(strip=True)
+if "-" in text:
+time_text = text.split("-")[-1].strip()
+if "," in time_text:
+tgl, jam = time_text.split(",")
+result["tanggal_publikasi"] = tgl.strip()
+result["jam_publikasi"] = jam.strip()
+
+# Ambil informasi editor
+credit = header.find("div", class_="credit")
+if credit:
+# Nama editor
+name_div = credit.find("div", class_="credit-title-nameEditor")
+if name_div:
+result["nama_editor"] = name_div.get_text(strip=True)
+
+# Jabatan editor
+job = credit.find("p")
+if job:
+result["jabatan_editor"] = job.get_text(strip=True)
+
+# Konten berita
+content = soup.find("div", class_="read__content")
+if content:
+clear = content.find("div", class_="clearfix")
+if clear:
+blocks = clear.find_all(["p", "h2"])
+paragraphs = [blk.get_text(strip=True) for blk in blocks]
+result["konten_berita"] = "\n".join(paragraphs)
+
+# Tags
+tags = []
+tag_containers = [
+soup.find("div", class_="read__tagging mt1 clearfix"),
+soup.find("div", class_="tag tag--article clearfix"),
+soup.find("div", class_="tag_article_teaser"),
+soup.find("ul", class_="tag_article_wrap")
+]
+for container in tag_containers:
+if container:
+tag_links = container.find_all("a")
+for tag in tag_links:
+tag_text = tag.get_text(strip=True)
+if tag_text and tag_text not in tags:
+tags.append(tag_text)
+
+result["tag_berita"] = ", ".join(tags)
+
+return result
+
+
+# Main execution
+if __name__ == "__main__":
+links = get_all_article_links()
+print(f"🔍 Total link ditemukan: {len(links)}")
+
+data = []
+for idx, link in enumerate(links):
+print(f"\n📄 Scraping artikel ke-{idx+1}: {link}")
+try:
+article = scrape_article(link)
+data.append(article)
+time.sleep(1)
+except Exception as e:
+print(f"❌ Error scraping: {e}")
+
+if data:
+# Simpan ke CSV
+# nama_file_csv = "begal_kompas.csv"
+# with open(nama_file_csv, "w", newline="", encoding="utf-8") as f:
+# writer = csv.DictWriter(f, fieldnames=data[0].keys())
+# writer.writeheader()
+# writer.writerows(data)
+# print("✅ Data disimpan di", nama_file_csv)
+
+# Simpan ke JSON
+nama_file_json = "kesehatan-mental.json"
+with open(nama_file_json, "w", encoding="utf-8") as f:
+json.dump(data, f, ensure_ascii=False, indent=4)
+print("✅ Data disimpan di", nama_file_json)
+
+else:
+print("⚠ Tidak ada data yang berhasil diambil.")
+
+
+
+
+
+
+
+
+<div class="col-bs10-7">
+    <div class="sectionHead">
+        <div class="sectionHead-wrap">
+            <div class="headBox-wrap">
+                <div class="headTabs">
+                    <div class="headTabs-item ">
+                        <a href="javascript:void(0);" onclick="setType('all')" data-google-interstitial="false">
+                            <span>Semua</span>
+                        </a>
+                    </div>
+                    <div class="headTabs-item --active">
+                        <a href="javascript:void(0);" onclick="setType('article')" data-google-interstitial="false">
+                            <span>Artikel</span>
+                        </a>
+                    </div>
+                    <div class="headTabs-item ">
+                        <a href="javascript:void(0);" onclick="setType('video')" data-google-interstitial="false">
+                            <span>Video</span>
+                        </a>
+                    </div>
+                </div>
+                <div class="searchContent">
+                    <p>Ditemukan <span id="headArticle-count">2873</span>
+                        hasil dari pencarian
+                        <b>"<span id="headArticle-keyword">mental</span>"</b>
+                    </p>
+                </div>
+                <div class="headArticle-filter">
+                    <button class="headArticle-btn --active" onclick="setSort('score')"
+                        data-sort="relevansi">Relevansi</button>
+                    <button class="headArticle-btn " onclick="setSort('latest')" data-sort="terbaru">Terbaru</button>
+
+                    <div class="headFilter">
+                        <button class="headArticle-btn" id="filterButton">
+                            <span class="ico icoFilter"></span>
+                        </button>
+
+                        <!-- Filter -->
+                        <div class="modalsFilter" id="filterContainer">
+                            <div class="modalsFilter-inner">
+                                <form action="https://search.kompas.com/search/filter" method="GET">
+                                    <input type="text" id="q" name="q" value="mental" hidden="">
+                                    <input type="text" id="sort" name="sort" value="" hidden="">
+                                    <div class="filterContainer">
+                                        <div class="filterGroup">
+                                            <label for="site_id">Kanal</label>
+                                            <div class="formSelect">
+                                                <select id="site_id" name="site_id">
+                                                    <option value="all" selected="">
+                                                        Semua kanal</option>
+                                                    <option value="1">
+                                                        News </option>
+                                                    <option value="7">
+                                                        Tekno </option>
+                                                    <option value="8">
+                                                        Bola </option>
+                                                    <option value="10">
+                                                        Entertainment </option>
+                                                    <option value="15">
+                                                        Otomotif </option>
+                                                    <option value="20">
+                                                        Lifestyle </option>
+                                                    <option value="21">
+                                                        Properti </option>
+                                                    <option value="23">
+                                                        Sains </option>
+                                                    <option value="26">
+                                                        Money </option>
+                                                    <option value="27">
+                                                        Travel </option>
+                                                    <option value="65">
+                                                        Tren </option>
+                                                    <option value="66">
+                                                        Hype </option>
+                                                    <option value="68">
+                                                        Health </option>
+                                                    <option value="69">
+                                                        Skola </option>
+                                                    <option value="70">
+                                                        Global </option>
+                                                    <option value="71">
+                                                        Edukasi </option>
+                                                    <option value="75">
+                                                        Food </option>
+                                                    <option value="76">
+                                                        Homey </option>
+                                                    <option value="78">
+                                                        Regional </option>
+                                                    <option value="79">
+                                                        Stori </option>
+                                                    <option value="80">
+                                                        Konsultasi hukum </option>
+                                                    <option value="81">
+                                                        Wiken </option>
+                                                    <option value="82">
+                                                        Cek fakta </option>
+                                                    <option value="83">
+                                                        Umkm </option>
+                                                    <option value="84">
+                                                        Agri </option>
+                                                    <option value="85">
+                                                        Katanetizen </option>
+                                                    <option value="86">
+                                                        Lestari </option>
+                                                    <option value="87">
+                                                        Ikn </option>
+                                                    <option value="88">
+                                                        Prov </option>
+                                                    <option value="89">
+                                                        Warta </option>
+                                                    <option value="90">
+                                                        Cahaya </option>
+                                                    <option value="91">
+                                                        Laya </option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="filterGroup">
+                                            <label>Waktu</label>
+                                            <div class="radioInput">
+                                                <input type="radio" id="all-time" name="time" value="all" checked="">
+                                                <label for="all-time">Semua waktu</label>
+                                            </div>
+                                            <div class="radioInput">
+                                                <input type="radio" id="today" name="time" value="today">
+                                                <label for="today">Hari ini</label>
+                                            </div>
+                                            <div class="radioInput">
+                                                <input type="radio" id="yesterday" name="time" value="yesterday">
+                                                <label for="yesterday">Kemarin</label>
+                                            </div>
+                                            <div class="radioInput">
+                                                <input type="radio" id="last-month" name="time" value="last-month">
+                                                <label for="last-month">Sebulan lalu</label>
+                                            </div>
+                                            <div class="radioInput">
+                                                <input type="radio" id="custom-time" name="time" value="custom">
+                                                <label for="custom-time">Pilih waktu</label>
+                                            </div>
+                                            <div class="formDaterange" style="display: none;" id="custom-date-range">
+                                                <input type="date" id="start-date" name="start-date" value=""
+                                                    placeholder="Dari" max="2025-10-08">
+                                                <input type="date" id="end-date" name="end-date" value=""
+                                                    placeholder="Sampai" max="2025-10-08">
+                                            </div>
+                                        </div>
+                                        <div class="filterBtn">
+                                            <button class="btn" id="apply-filter">Terapkan</button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row indeks__form clearfix">
+    </div>
+
+    <div class="sectionBox">
+
+        <!-- <div class="articleSlider-mini swiper-articleMini">
+                <div class="swiper-wrapper">
+                    <div class="swiper-slide">
+                        <div class="articleItem">
+                            <a class="article-link" href="">
+                                <div class="articleItem-wrap">
+                                    <div class="articleItem-img">
+                                        <img src="https://asset.kompas.com/crop/0x0:0x0/740x400/data/photo/2024/10/20/6714825f4227b.jpg"
+                                            alt="Prabowo Subianto" />
+                                    </div>
+                                    <div class="articleItem-box">
+                                        <div class="articlePost-subtitle">Tokoh</div>
+                                        <h2 class="articleTitle">Prabowo Subianto</h2>
+                                        <div class="articleSubtitle">Presiden Republik Indonesia</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="swiper-slide">
+                        <div class="articleItem">
+                            <a class="article-link" href="">
+                                <div class="articleItem-wrap">
+                                    <div class="articleItem-img">
+                                        <img src="https://asset.kompas.com/crop/0x0:0x0/740x400/data/photo/2019/08/11/5d4f6e82a2f03.jpeg"
+                                            alt="Prananda Prabowo" />
+                                    </div>
+                                    <div class="articleItem-box">
+                                        <div class="articlePost-subtitle">Tokoh</div>
+                                        <h2 class="articleTitle">Prananda Prabowo</h2>
+                                        <div class="articleSubtitle">Presiden Republik Indonesia</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="swiper-slide">
+                        <div class="articleItem">
+                            <a class="article-link" href="">
+                                <div class="articleItem-wrap">
+                                    <div class="articleItem-img">
+                                        <img src="https://asset.kompas.com/crop/0x0:0x0/740x400/data/photo/2019/10/25/5db2a90c29d3a.jpg"
+                                            alt="Didit Prabowo" />
+                                    </div>
+                                    <div class="articleItem-box">
+                                        <div class="articlePost-subtitle">Tokoh</div>
+                                        <h2 class="articleTitle">Didit Prabowo</h2>
+                                        <div class="articleSubtitle">Presiden Republik Indonesia</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <a href="#" class="swiper-button swiper-button-prev"><span></span></a>
+                <a href="#" class="swiper-button swiper-button-next"><span></span></a>
+            </div> -->
+
+        <div class="articleList -list ">
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://bola.kompas.com/read/2022/03/03/09000058/misi-shin-tae-yong-di-piala-dunia-u20--perkuat-fisik-dan-mental-demi-kalahkan">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/OhKqcR-fabcetaRljY4Wrx4RVss=/0x0:1280x853/750x500/data/photo/2022/02/10/6205290d74fd5.jpeg"
+                                alt="Misi Shin Tae-yong di Piala Dunia U20: Perkuat Fisik dan Mental demi Kalahkan Postur Tinggi Lawan">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Misi Shin Tae-yong di Piala Dunia U20: Perkuat Fisik dan Mental
+                                demi Kalahkan Postur Tinggi Lawan</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Bola </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            3 Maret 2022</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Pelatih timnas U19 Indonesia Shin Tae-yong mengatakan bahwa banyak hal yang harus
+                                    diperbaiki dari para pemain menjelang perhelatan Piala Dunia U20.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://regional.kompas.com/read/2021/11/21/075000278/5-fakta-soal-rampok-burung-merpati-yang-dibeli-rp-2-miliar-berusia-2-5">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/Dr8Wgsn_lmrLEFGEohSDzUTHlts=/0x0:0x0/750x500/data/photo/2021/11/19/6197b33c2c6f1.jpg"
+                                alt="5 Fakta soal " rampok",="" burung="" merpati="" yang="" dibeli="" rp="" 2=""
+                                miliar,="" berusia="" 2,5="" bulan="" dan="" punya="" mental="" juara"="">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">5 Fakta soal "Rampok", Burung Merpati yang Dibeli Rp 2 Miliar,
+                                Berusia 2,5 Bulan dan Punya Mental Juara</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Regional </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            21 November 2021</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>5 fakta tentang burung merpati "Rampok" di Kota Tegal antara lain masih berusia 2,5
+                                    tahun dan dianggap memiliki mental juara.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://www.kompas.com/global/read/2024/10/22/180300570/polisi-china-tuai-pujian-11-tahun-rela-menyamar-jadi-anak-dari-ibu-yang">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/A80WGoCL9uUV0KyAXW3_D5OzRdg=/0x0:1020x680/750x500/data/photo/2024/10/22/6717620326048.jpg"
+                                alt="Polisi China Tuai Pujian, 11 Tahun Rela Menyamar Jadi Anak dari Ibu yang Alami Gangguan Mental karena Putranya Tewas">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Polisi China Tuai Pujian, 11 Tahun Rela Menyamar Jadi Anak dari Ibu
+                                yang Alami Gangguan Mental karena Putranya Tewas</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Global </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            22 Oktober 2024</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Seorang polisi di China menuai pujian setelah rela menyamar 11 tahun menjadi anak
+                                    dari seorang ibu yang mengalami gangguan mental. Simak kisahnya.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://nasional.kompas.com/read/2024/06/29/13142511/sesalkan-tak-ada-pihak-bertanggung-jawab-penuh-atas-peretasan-pdn-anggota">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/r1QabeOQ0Rz1N2mwy5qOZqzoEmg=/0x0:640x427/750x500/data/photo/2024/02/13/65caded202ee9.jpeg"
+                                alt="Sesalkan Tak Ada Pihak Bertanggung Jawab Penuh atas Peretasan PDN, Anggota DPR: Ini Soal Mental Penjabat Kita... ">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Sesalkan Tak Ada Pihak Bertanggung Jawab Penuh atas Peretasan PDN,
+                                Anggota DPR: Ini Soal Mental Penjabat Kita... </h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            News </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            29 Juni 2024</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>"Ini persoalan mental kita sebagai bangsa, pejabat kita ini tidak dibiasakan untuk
+                                    bertanggung jawab..," katanya.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://regional.kompas.com/read/2023/03/01/083000078/sosok-kakek-yang-bawa-uang-rp-43-juta-di-ntb-pernah-kerja-di-malaysia-dan">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/p_sclKnVLfUvPUwZlmxSq4H096g=/0x0:0x0/750x500/data/photo/2023/02/28/63fdefe1661d2.jpg"
+                                alt="Sosok Kakek yang Bawa Uang Rp 43 Juta di NTB, Pernah Kerja di Malaysia dan Punya Riwayat Gangguan Mental">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Sosok Kakek yang Bawa Uang Rp 43 Juta di NTB, Pernah Kerja di
+                                Malaysia dan Punya Riwayat Gangguan Mental</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Regional </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            1 Maret 2023</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Polisi menjelaskan uang Rp 43 juta milik Kakek Suaen (80) dibungkus plastik hitam dan
+                                    disimpan di lipatan sarung yang dikenakan.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://www.kompas.com/hype/read/2021/10/06/070000066/olivia-nathania-dan-suami-mangkir-dari-pemeriksaan-disebut-belum-siap">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/LI3rsj7P7MJ9QFCrzySSBMgg03g=/257x91:1343x815/750x500/data/photo/2021/09/30/6155b549f123a.jpeg"
+                                alt="Olivia Nathania dan Suami Mangkir dari Pemeriksaan, Disebut Belum Siap Mental dan Depresi Terseret Dugaan Penipuan CPNS">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Olivia Nathania dan Suami Mangkir dari Pemeriksaan, Disebut Belum
+                                Siap Mental dan Depresi Terseret Dugaan Penipuan CPNS</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Hype </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            6 Oktober 2021</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>"Misalnya kita melakukan sesuatu, terus tiba-tiba dipelintir sedikit, ter-blow up
+                                    banyak, pastinya kan psikisnya berat juga," kata kuasa hukum Olivia.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://go.kompas.com/read/2021/04/15/171345074/indonesian-police-arrest-man-with-mental-illness-who-allegedly-tried-to-enter-the">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/3OZVk3zILaXiBdczsBJdOKjq6Ws=/0x0:1000x667/750x500/data/photo/2018/04/30/3654914483.jpg"
+                                alt="Indonesian Police Arrest Man with Mental Illness Who Allegedly Tried to Enter the Premises of Russian Embassy ">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Indonesian Police Arrest Man with Mental Illness Who Allegedly
+                                Tried to Enter the Premises of Russian Embassy </h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Go </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            15 April 2021</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>A 34-year-old man identified as GO who allegedly tries to force entry into the
+                                    Russian Embassy in Jakarta was detained by security officers.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://nasional.kompas.com/read/2024/06/12/07243611/timnas-lolos-ke-putaran-ketiga-kualifikasi-piala-dunia-2026-erick-thohir">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/mFWPtcEU8ss7shYD2eK-_GRSstk=/0x0:3675x2450/750x500/data/photo/2024/06/11/66687d1527684.jpeg"
+                                alt="Timnas Lolos ke Putaran Ketiga Kualifikasi Piala Dunia 2026, Erick Thohir Sebut Harus Kuat Fisik dan Mental">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Timnas Lolos ke Putaran Ketiga Kualifikasi Piala Dunia 2026, Erick
+                                Thohir Sebut Harus Kuat Fisik dan Mental</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            News </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            12 Juni 2024</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Erick mengatakan, perjalanan timnas di babak ketiga kualifikasi Piala Dunia 2026 akan
+                                    semakin berat karena harus melakoni 10 pertandingan.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://bola.kompas.com/read/2025/08/25/16495958/timnas-putri-u16-indonesia-ke-semifinal-piala-aff-putri-u16-2025-atasi-tekanan">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/BnS440B2VXjxu7h7zDcvKoVYs3o=/0x0:762x508/750x500/data/photo/2025/08/25/68abf86105b25.jpeg"
+                                alt="Timnas Putri U16 Indonesia ke Semifinal Piala AFF Putri U16 2025, Atasi Tekanan Mental dan Trauma Cedera">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Timnas Putri U16 Indonesia ke Semifinal Piala AFF Putri U16 2025,
+                                Atasi Tekanan Mental dan Trauma Cedera</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Bola </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            25 Agustus 2025</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Timnas Putri U16 Indonesia mampu lolos ke semifinal Piala AFF Putri U16 2025 usai
+                                    sukses mengatasi tekanan dan permainan keras Malaysia.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://tekno.kompas.com/read/2023/01/14/08000027/-populer-tekno-ramai-kalkulator-kesehatan-mental-online-viral-foto-diduga">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/nWfnfh1uxFB3N7eqTzgGMItGe4s=/103x36:575x351/750x500/data/photo/2023/01/08/63bad3ea89905.jpg"
+                                alt="[POPULER TEKNO] Ramai Kalkulator Kesehatan Mental Online | Viral Foto Diduga Penampakan Kota Saranjana, Ini Penjelasan Teknis Fotografinya">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">[POPULER TEKNO] Ramai Kalkulator Kesehatan Mental Online | Viral
+                                Foto Diduga Penampakan Kota Saranjana, Ini Penjelasan Teknis Fotografinya</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Tekno </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            14 Januari 2023</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Selain topik tersebut, ada pula peluncuran Intel Core i9-13900KS dan game gratis dari
+                                    PS Plus yang juga cukup banyak dibaca.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://megapolitan.kompas.com/read/2022/11/22/11400171/polisi-gandeng-psikologi-forensik-dalam-kasus-kematian-keluarga-di">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/-Jq2SzN2o9lI4vHq1_RwcQ3czzg=/0x39:1024x722/750x500/data/photo/2022/11/17/63751d89ae520.jpg"
+                                alt="Polisi Gandeng Psikologi Forensik dalam Kasus Kematian Keluarga di Kalideres, Pakar: Untuk Kaji Tingkah Laku dan Mental Korban">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Polisi Gandeng Psikologi Forensik dalam Kasus Kematian Keluarga di
+                                Kalideres, Pakar: Untuk Kaji Tingkah Laku dan Mental Korban</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            News </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            22 November 2022</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Pakar psikologi forensik menilai kondisi mereka semasa hidup, termasuk kemungkinan
+                                    penyebab kematian, bisa ditelisik lewat otopsi psikologis.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://regional.kompas.com/read/2022/09/05/112008778/kasus-pencabulan-calon-pendeta-kepada-6-anak-di-ntt-korban-jalani-pemulihan">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/0NzuYGSf2prGBo7Y8KidWIDgzcc=/0x0:1000x667/750x500/data/photo/2019/11/18/5dd22b838fbbb.jpg"
+                                alt=" Kasus Pencabulan Calon Pendeta kepada 6 Anak di NTT, Korban Jalani Pemulihan Mental dan Psikis, Pelaku Diburu Polisi">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle"> Kasus Pencabulan Calon Pendeta kepada 6 Anak di NTT, Korban Jalani
+                                Pemulihan Mental dan Psikis, Pelaku Diburu Polisi</h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Regional </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            5 September 2022</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>Kasus dugaan pencabulan yang dilakukan oleh calon pendeta (vikaris) di lingkungan
+                                    gereja Kota Kupang, Nusa Tenggara Timur (NTT), dilaporkan ke polisi.</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="articleItem">
+                <a class="article-link"
+                    href="https://biz.kompas.com/read/2024/10/25/160000628/terbukti-andal-mendukung-kesehatan-tubuh-dan-mental-huawei-watch-gt-5-series">
+                    <div class="articleItem-wrap">
+                        <div class="articleItem-img">
+
+                            <img src="https://asset.kompas.com/crops/IrQ0Kq8Q0Tdex7tRZsXX0zahQWg=/0x0:779x519/750x500/data/photo/2024/10/25/671b3ef68e14e.jpg"
+                                alt="Terbukti Andal Mendukung Kesehatan Tubuh dan Mental, HUAWEI WATCH GT 5 Series Sukses Terjual Lebih dari 10.000 Unit dalam 8 Hari ">
+                        </div>
+                        <div class="articleItem-box">
+                            <h2 class="articleTitle">Terbukti Andal Mendukung Kesehatan Tubuh dan Mental, HUAWEI WATCH
+                                GT 5 Series Sukses Terjual Lebih dari 10.000 Unit dalam 8 Hari </h2>
+                            <div class="articlePost">
+                                <ul>
+                                    <li>
+                                        <div class="articlePost-subtitle ">
+                                            Advertorial </div>
+
+                                    </li>
+                                    <li>
+                                        <div class="articlePost-date">
+                                            25 Oktober 2024</div>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="articleLead">
+                                <p>berkat fitur olahraga level pro dan kesehatan emosional, HUAWEI WATCH GT 5 Series
+                                    jadi favorit para pecinta gaya hidup sehat. Huawei juga hadirkan var</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <div class="text-center mt5 clearfix">
+            <div class="paging clearfix">
+                <div class="paging__wrap clearfix">
+                    <div class="paging__item"><a class="paging__link paging__link--first"
+                            href="https://search.kompas.com/search?q=mental&amp;site_id=all&amp;last_date=all&amp;type=article"
+                            data-ci-pagination-page="1" rel="start" data-google-interstitial="false">‹ First</a></div>
+                    <div class="paging__item"><a class="paging__link paging__link--prev"
+                            href="https://search.kompas.com/search?q=mental&amp;site_id=all&amp;last_date=all&amp;type=article&amp;page=143"
+                            data-ci-pagination-page="143" rel="prev" data-google-interstitial="false">Prev</a></div>
+                    <div class="paging__item"><a class="paging__link"
+                            href="https://search.kompas.com/search?q=mental&amp;site_id=all&amp;last_date=all&amp;type=article&amp;page=142"
+                            data-ci-pagination-page="142" data-google-interstitial="false">142</a></div>
+                    <div class="paging__item"><a class="paging__link"
+                            href="https://search.kompas.com/search?q=mental&amp;site_id=all&amp;last_date=all&amp;type=article&amp;page=143"
+                            data-ci-pagination-page="143" data-google-interstitial="false">143</a></div>
+                    <div class="paging__item"><a class="paging__link paging__link--active" href="javascript:void(0)"
+                            data-google-interstitial="false">144</a></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

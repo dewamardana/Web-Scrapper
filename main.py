@@ -57,8 +57,52 @@ def get_halodoc_article_detail(url):
                     date = text
                     break
 
-        content_tags = soup.select("div[class*=content] p, div.css-16z3ifd p")
-        content = "\n".join(p.get_text(strip=True) for p in content_tags)
+        article_container = soup.select_one("#articleContent")
+
+        content_parts = []
+
+        if article_container:
+
+            for element in article_container.descendants:
+
+                # Skip NavigableString kosong
+                if not hasattr(element, "name") or element.name is None:
+                    continue
+
+                text = element.get_text(" ", strip=True)
+                if not text:
+                    continue
+
+                # ===== Heading =====
+                if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                    content_parts.append(f"\n## {text}\n")
+
+                # ===== Paragraf =====
+                elif element.name == "p":
+                    content_parts.append(text)
+
+                # ===== Blockquote =====
+                elif element.name == "blockquote":
+                    content_parts.append(f"\n> {text}\n")
+
+                # ===== List Container =====
+                elif element.name in ["ul", "ol"]:
+                    for li in element.find_all("li", recursive=False):
+                        li_text = li.get_text(" ", strip=True)
+                        if li_text:
+                            content_parts.append(f"- {li_text}")
+
+                # ===== Line Break =====
+                elif element.name == "br":
+                    content_parts.append("\n")
+
+                # ===== Strong / Emphasis (jika berdiri sendiri) =====
+                elif element.name in ["strong", "em"]:
+                    content_parts.append(text)
+
+        # Gabungkan & bersihkan newline berlebih
+        content = "\n".join(content_parts)
+        content = "\n".join(line for line in content.splitlines() if line.strip())
 
         tag_labels = soup.select("div.label-container label")
         tags = [t.get_text(strip=True) for t in tag_labels]
@@ -566,9 +610,9 @@ def main(keyword):
         print("❌ Input tidak valid, menggunakan default 20 artikel.")
         max_artikel = 20
 
-    # search_halodoc(keyword, max_articles=max_artikel)
+    search_halodoc(keyword, max_articles=max_artikel)
     # search_alodokter(keyword, max_articles=max_artikel)
-    search_hellosehat(keyword, max_articles=max_artikel)
+    # search_hellosehat(keyword, max_articles=max_artikel)
 
 
 if __name__ == "__main__":
