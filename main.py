@@ -224,12 +224,45 @@ def get_alodokter_article_detail(url):
             else ""
         )
 
-        article_content = soup.select_one("div#postContent")
-        content = (
-            "\n".join(p.get_text(strip=True) for p in article_content.find_all("p"))
-            if article_content
-            else ""
-        )
+        article_container = soup.select_one("#postContent")
+        content_parts = []
+
+        if article_container:
+
+            for element in article_container.descendants:
+
+                if not hasattr(element, "name") or element.name is None:
+                    continue
+
+                text = element.get_text(" ", strip=True)
+                if not text:
+                    continue
+
+                # ===== Heading =====
+                if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                    content_parts.append(f"\n## {text}\n")
+
+                # ===== Paragraph =====
+                elif element.name == "p":
+                    content_parts.append(text)
+
+                # ===== Blockquote =====
+                elif element.name == "blockquote":
+                    content_parts.append(f"\n> {text}\n")
+
+                # ===== List =====
+                elif element.name in ["ul", "ol"]:
+                    for li in element.find_all("li", recursive=False):
+                        li_text = li.get_text(" ", strip=True)
+                        if li_text:
+                            content_parts.append(f"- {li_text}")
+
+                # ===== Line break =====
+                elif element.name == "br":
+                    content_parts.append("\n")
+
+        content = "\n".join(content_parts)
+        content = "\n".join(line for line in content.splitlines() if line.strip())
 
         tag_labels = soup.select("div.tag-label-container .tag-label")
         tags = [t.get_text(strip=True) for t in tag_labels]
@@ -306,7 +339,7 @@ def search_alodokter(keyword, max_articles=3):
                             print(f"✅ Berhasil ({collected}/{max_articles})")
                         else:
                             detail = get_detail_with_retry(
-                                get_halodoc_article_detail, full_url
+                                get_alodokter_article_detail, full_url
                             )
                             if detail:
                                 data.append(detail)
@@ -406,21 +439,57 @@ def get_hellosehat_article_detail(url, driver=None):
                 date = txt.split("Diperbarui")[-1].strip()
 
         # ===== Isi artikel =====
-        content_parts = []
-        body = soup.select_one("div.css-jwma8r.eq7z8yn3")
-        if body:
-            for p in body.select("p"):
-                t = p.get_text(" ", strip=True)
-                if t and "Baca juga" not in t:
-                    content_parts.append(t)
+        # ===== TARGET SEMUA BODY-CONTENT =====
+        containers = soup.select("div.body-content.article-content-wrapper")
 
-        if not content_parts:
-            for p in soup.select("div.body-content.article-content-wrapper p"):
-                t = p.get_text(" ", strip=True)
-                if t and "Baca juga" not in t:
-                    content_parts.append(t)
+        content_parts = []
+
+        for body in containers:
+
+            if not body.get_text(strip=True):
+                continue
+
+            for element in body.descendants:
+
+                if not hasattr(element, "name") or element.name is None:
+                    continue
+
+                # Skip benar-benar tidak berguna
+                if element.name in ["script", "style", "noscript"]:
+                    continue
+
+                # Skip unwanted blocks berdasarkan class
+                class_list = " ".join(element.get("class", []))
+                skip_classes = ["leadgen", "ad-", "viralize", "subscription"]
+
+                if any(skip in class_list for skip in skip_classes):
+                    continue
+
+                text = element.get_text(" ", strip=True)
+                if not text:
+                    continue
+
+                # ===== Heading =====
+                if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                    content_parts.append(f"\n## {text}\n")
+
+                # ===== Paragraph =====
+                elif element.name == "p":
+                    content_parts.append(text)
+
+                # ===== List =====
+                elif element.name in ["ul", "ol"]:
+                    for li in element.find_all("li"):
+                        li_text = li.get_text(" ", strip=True)
+                        if li_text:
+                            content_parts.append(f"- {li_text}")
+
+                # ===== Blockquote =====
+                elif element.name == "blockquote":
+                    content_parts.append(f"\n> {text}\n")
 
         content = "\n".join(content_parts)
+        content = "\n".join(line for line in content.splitlines() if line.strip())
 
         # ===== Tags =====
         tags = [
@@ -610,9 +679,9 @@ def main(keyword):
         print("❌ Input tidak valid, menggunakan default 20 artikel.")
         max_artikel = 20
 
-    search_halodoc(keyword, max_articles=max_artikel)
+    # search_halodoc(keyword, max_articles=max_artikel)
     # search_alodokter(keyword, max_articles=max_artikel)
-    # search_hellosehat(keyword, max_articles=max_artikel)
+    search_hellosehat(keyword, max_articles=max_artikel)
 
 
 if __name__ == "__main__":
