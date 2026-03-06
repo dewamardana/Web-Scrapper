@@ -4,208 +4,385 @@ import json
 import time
 import math
 import os
+from urllib.parse import quote
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+session = requests.Session()
+session.headers.update(HEADERS)
 
 
-# --- Fungsi untuk scraping detail artikel ---
+# ===============================
+# SAFE REQUEST (RETRY)
+# ===============================
+def safe_request(url, retries=3):
+
+    for i in range(retries):
+        try:
+            res = session.get(url, timeout=20)
+
+            if res.status_code == 200:
+                return res
+
+            print(f"⚠️ HTTP {res.status_code} : {url}")
+
+        except Exception as e:
+            print(f"⚠️ Request error ({i+1}/{retries}) : {e}")
+
+        time.sleep(2)
+
+    return None
+
+
+# ===============================
+# SCRAPE DETAIL ARTIKEL
+# ===============================
 def scrape_article(url):
-    res = requests.get(url, headers=HEADERS)
+
+    if "?page=" not in url and "#page" not in url:
+        if "?" in url:
+            url_all = url + "&page=all"
+        else:
+            url_all = url + "?page=all"
+    else:
+        url_all = url
+
+    res = safe_request(url_all)
+
+    if not res:
+        raise Exception("Request gagal")
+
     soup = BeautifulSoup(res.text, "html.parser")
 
     result = {
         "url": url,
-        "sumber_berita": "",
-        "jenis_konten": "",
+        "sumber_berita": "Kompas.com",
         "judul": "",
         "tanggal_publikasi": "",
-        "jam_publikasi": "",
         "nama_editor": "",
-        "jabatan_editor": "",
         "konten_berita": "",
         "tag_berita": "",
     }
 
-    # Breadcrumb
-    breadcrumb = soup.find("ul", class_="breadcrumb__wrap")
-    if breadcrumb:
-        items = breadcrumb.find_all("li", class_="breadcrumb__item")
-        if len(items) >= 2:
-            result["sumber_berita"] = items[0].get_text(strip=True)
-            result["jenis_konten"] = items[1].get_text(strip=True)
+    # ======================
+    # JUDUL
+    # ======================
+    title = soup.find("h1", class_="read__title")
 
-    # Judul
-    title_tag = soup.find("h1", class_="read__title")
-    if title_tag:
-        result["judul"] = title_tag.get_text(strip=True)
+    if not title:
+        title = soup.find("h1")
 
-    # Header (waktu & editor)
-    header = soup.find("div", class_="read__header")
-    if header:
-        time_div = header.find("div", class_="read__time")
-        if time_div:
-            text = time_div.get_text(strip=True)
-            if "-" in text:
-                time_text = text.split("-")[-1].strip()
-                if "," in time_text:
-                    tgl, jam = time_text.split(",")
-                    result["tanggal_publikasi"] = tgl.strip()
-                    result["jam_publikasi"] = jam.strip()
+    if title:
+        result["judul"] = title.get_text(strip=True)
 
-        credit = header.find("div", class_="credit")
-        if credit:
-            name_div = credit.find("div", class_="credit-title-nameEditor")
-            if name_div:
-                result["nama_editor"] = name_div.get_text(strip=True)
-            job = credit.find("p")
-            if job:
-                result["jabatan_editor"] = job.get_text(strip=True)
+    # ======================
+    # TANGGAL
+    # ======================
+    time_div = soup.find("div", class_="read__time")
 
-    # Konten
-    content = soup.find("div", class_="read__content")
-    if content:
-        clear = content.find("div", class_="clearfix")
-        if clear:
-            blocks = clear.find_all(["p", "h2"])
-            paragraphs = [blk.get_text(strip=True) for blk in blocks]
-            result["konten_berita"] = "\n".join(paragraphs)
+    if time_div:
+        text = time_div.get_text(" ", strip=True)
 
-    # Tags
-    tags = []
-    tag_containers = [
-        soup.find("div", class_="read__tagging mt1 clearfix"),
-        soup.find("div", class_="tag tag--article clearfix"),
-        soup.find("div", class_="tag_article_teaser"),
-        soup.find("ul", class_="tag_article_wrap"),
-    ]
-    for container in tag_containers:
-        if container:
-            for tag in container.find_all("a"):
-                tag_text = tag.get_text(strip=True)
-                if tag_text and tag_text not in tags:
-                    tags.append(tag_text)
+        if "," in text:
+            try:
+                parts = text.split(",")
+
+                if len(parts) >= 2:
+                    result["tanggal_publikasi"] = parts[1].replace("WIB", "").strip()
+            except:
+                pass
+
+    # ======================
+    # PENULIS (VERSI BARU)
+    # ======================
+    editor = soup.select_one("div.clearfix p strong")
+
+    if editor and "Oleh" in editor.text:
+        result["nama_editor"] = (
+            editor.get_text(strip=True).replace("Oleh:", "").replace("Oleh", "").strip()
+        )
+
+    # ======================
+    # PENULIS (VERSI LAMA)
+    # ======================
+    if not result["nama_editor"]:
+
+        old_editor = soup.select_one(".credit-title-nameEditor")
+
+        if old_editor:
+            result["nama_editor"] = old_editor.get_text(strip=True)
+
+    # ======================
+    # PENULIS (VERSI READ CREDIT)
+    # ======================
+    if not result["nama_editor"]:
+
+        credit_editor = soup.select_one("#editor a")
+
+        if credit_editor:
+            result["nama_editor"] = credit_editor.get_text(strip=True)
+
+    # ======================
+    # KONTEN ARTIKEL
+    # ======================
+    content_container = (
+        soup.select_one("#articleContent")
+        or soup.select_one(".read__content")
+        or soup.select_one("div.clearfix")
+    )
+
+    content_parts = []
+    seen_text = set()
+
+    if content_container:
+
+        # hapus elemen non artikel
+        for tag in content_container.select(
+            "script, style, iframe, .ads-on-body, .kompasidRec, "
+            ".ads-partner-wrap, .liftdown_v2_tanda, .inject-baca-juga"
+        ):
+            tag.decompose()
+
+        elements = content_container.find_all(
+            ["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "blockquote"]
+        )
+
+        for element in elements:
+
+            # ===== HEADING =====
+            if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+
+                text = element.get_text(" ", strip=True)
+
+                if text and text not in seen_text:
+                    content_parts.append(f"\n## {text}\n")
+                    seen_text.add(text)
+
+            # ===== PARAGRAPH =====
+            elif element.name == "p":
+
+                text = element.get_text(" ", strip=True)
+
+                if not text:
+                    continue
+
+                # skip teks tidak relevan
+                if text.startswith("Oleh"):
+                    continue
+
+                if "Baca juga" in text:
+                    continue
+
+                if "KOMPAS.com berkomitmen" in text:
+                    continue
+
+                if text not in seen_text:
+                    content_parts.append(text)
+                    seen_text.add(text)
+
+            # ===== LIST =====
+            elif element.name in ["ul", "ol"]:
+
+                for li in element.find_all("li"):
+
+                    li_text = li.get_text(" ", strip=True)
+
+                    if li_text and li_text not in seen_text:
+                        content_parts.append(f"- {li_text}")
+                        seen_text.add(li_text)
+
+            # ===== QUOTE =====
+            elif element.name == "blockquote":
+
+                text = element.get_text(" ", strip=True)
+
+                if text and text not in seen_text:
+                    content_parts.append(f"> {text}")
+                    seen_text.add(text)
+
+    result["konten_berita"] = "\n".join(content_parts)
+
+    # ======================
+    # TAG
+    # ======================
+    tags = set()
+
+    tag_links = soup.select("div.read__tagging a")
+
+    for tag in tag_links:
+
+        txt = tag.get_text(strip=True)
+
+        if txt:
+            tags.add(txt)
 
     result["tag_berita"] = ", ".join(tags)
+
     return result
 
 
-# --- Fungsi untuk mengambil semua artikel per halaman dan langsung disimpan ---
+# ===============================
+# SAVE JSON AMAN
+# ===============================
+def safe_save_json(data, output_file):
+
+    temp_file = output_file + ".tmp"
+
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+    os.replace(temp_file, output_file)
+
+
+# ===============================
+# SCRAPE SEMUA ARTIKEL
+# ===============================
 def get_all_article_links(
     query="kesehatan mental", debug=True, output_file="kesehatan-mental.json"
 ):
-    all_links = []
+
+    encoded_query = quote(query)
+
     page = 1
     prev_page_links = set()
     total_pages = None
+    scraped_urls = set()
 
-    # Jika file JSON sudah ada → lanjut append
     if os.path.exists(output_file):
+
         with open(output_file, "r", encoding="utf-8") as f:
+
             try:
                 existing_data = json.load(f)
-            except json.JSONDecodeError:
+
+                for item in existing_data:
+                    scraped_urls.add(item["url"])
+
+            except:
                 existing_data = []
+
     else:
         existing_data = []
 
-    print(f"📂 [INFO] Memulai scraping dari halaman 1...")
-    print(f"📁 File output: {output_file}\n")
+    print("📂 Mulai scraping...\n")
 
     while True:
-        print(f"\n🔄 [DEBUG] Mengambil halaman ke-{page}...")
-        url = f"https://search.kompas.com/search?q={query.replace(' ', '+')}&site_id=all&last_date=all&type=article&page={page}"
-        print(f"🌐 [DEBUG] URL: {url}")
 
-        try:
-            res = requests.get(url, headers=HEADERS, timeout=20)
-        except Exception as e:
-            print(f"⚠️ [ERROR] Gagal mengakses halaman {page}: {e}")
-            page += 1
-            continue
+        url = f"https://search.kompas.com/search?q={encoded_query}&site_id=all&last_date=all&type=article&page={page}"
 
-        print(f"📶 [DEBUG] Status kode: {res.status_code}")
-        if res.status_code != 200:
-            print(f"⚠️ Halaman {page} gagal dimuat (status {res.status_code})")
+        print(f"\n🔎 Halaman {page}")
+        print(f"🌐 {url}")
+
+        res = safe_request(url)
+
+        if not res:
+            print("❌ Halaman gagal diakses")
             break
 
         soup = BeautifulSoup(res.text, "html.parser")
 
-        # ✅ Ambil total artikel (hanya halaman 1)
+        # ======================
+        # TOTAL ARTIKEL
+        # ======================
         if total_pages is None:
+
             count_tag = soup.find("span", id="headArticle-count")
+
             if count_tag:
+
                 try:
                     total_results = int(count_tag.text.strip())
                     total_pages = math.ceil(total_results / 20)
-                    print(
-                        f"📊 [DEBUG] Total hasil pencarian: {total_results} artikel ≈ {total_pages} halaman."
-                    )
-                except ValueError:
-                    total_pages = 499
-            else:
-                total_pages = 499
 
-        # Ambil daftar artikel di halaman ini
+                    print(
+                        f"📊 Total hasil: {total_results} artikel ≈ {total_pages} halaman"
+                    )
+
+                except:
+                    total_pages = 500
+            else:
+                total_pages = 500
+
+        # ======================
+        # LIST ARTIKEL
+        # ======================
         article_list = soup.find("div", class_="articleList")
+
         items = (
             article_list.find_all("div", class_="articleItem") if article_list else []
         )
-        print(f"🧩 [DEBUG] Jumlah artikel di halaman {page}: {len(items)}")
+
+        print(f"🧩 Artikel ditemukan: {len(items)}")
 
         if not items:
-            print(f"❌ Tidak ada artikel di halaman {page}. Stop scraping.")
             break
 
-        # Ambil semua link di halaman ini
         current_page_links = set()
+
         for item in items:
+
             a_tag = item.find("a")
+
             if a_tag and a_tag.get("href"):
+
                 href = a_tag["href"]
+
                 if "tv.kompas.com" not in href:
                     current_page_links.add(href)
 
-        # 🚨 Deteksi halaman duplikat
         if current_page_links == prev_page_links:
-            print("⚠️ [DEBUG] Halaman ini sama dengan sebelumnya. Stop.")
+            print("⚠️ Halaman duplikat terdeteksi")
             break
+
         prev_page_links = current_page_links
 
-        # Scrape tiap artikel di halaman ini
         page_data = []
+
         for i, link in enumerate(current_page_links, start=1):
-            print(f"📰 [{page}:{i}] Scraping artikel: {link}")
+
+            if link in scraped_urls:
+                print(f"⏭️ Skip (sudah ada) : {link}")
+                continue
+
+            print(f"📰 [{page}:{i}] Scraping")
+
             try:
+
                 article = scrape_article(link)
+
                 page_data.append(article)
+                scraped_urls.add(link)
+
                 time.sleep(1)
+
             except Exception as e:
-                print(f"❌ Gagal scraping artikel: {e}")
+                print(f"❌ Gagal scrape: {e}")
 
-        # Simpan hasil halaman ke file JSON (append)
         if page_data:
-            existing_data.extend(page_data)
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(existing_data, f, ensure_ascii=False, indent=4)
-            print(
-                f"💾 [SAVED] {len(page_data)} artikel disimpan dari halaman {page}. Total {len(existing_data)} artikel.\n"
-            )
 
-        # Stop jika sudah mencapai halaman terakhir
+            existing_data.extend(page_data)
+
+            safe_save_json(existing_data, output_file)
+
+            print(f"💾 Disimpan {len(page_data)} artikel | Total {len(existing_data)}")
+
         if total_pages and page >= total_pages:
-            print(f"🏁 [DEBUG] Sudah mencapai halaman terakhir ({page}/{total_pages}).")
+            print("🏁 Halaman terakhir tercapai")
             break
 
         page += 1
         time.sleep(2)
 
-    print(f"\n🎯 Total artikel tersimpan: {len(existing_data)}")
+    print(f"\n🎯 Total artikel: {len(existing_data)}")
+
     return existing_data
 
 
-# --- Main eksekusi ---
+# ===============================
+# MAIN
+# ===============================
 if __name__ == "__main__":
-    query = input("🔍 Masukkan kata kunci pencarian artikel: ") or "kesehatan mental"
+
+    query = input("🔍 Kata kunci: ") or "kesehatan mental"
+
     get_all_article_links(query=query)
